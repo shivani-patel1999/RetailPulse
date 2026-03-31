@@ -1,0 +1,56 @@
+# .github/workflows/daily_data.yml
+#
+# RetailPulse — Daily Data Generation Workflow
+# Runs every day at 00:15 UTC (just after midnight) to generate
+# the previous day's retail transactions and upload to GCS.
+#
+# Required GitHub Secrets (set in repo Settings → Secrets → Actions):
+#   GCS_BUCKET_NAME           → your GCS bucket name, e.g. retailpulse-raw
+#   GCP_SERVICE_ACCOUNT_KEY   → contents of your GCP service account JSON key file
+
+name: Daily Retail Data Generation
+
+on:
+  schedule:
+    - cron: "15 0 * * *"   # 00:15 UTC every day
+  workflow_dispatch:         # also allows manual trigger from GitHub UI
+
+jobs:
+  generate-and-upload:
+    name: Generate + Upload to GCS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # 1. Check out the repo so the script is available
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Set up Python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: pip install -r data_generator/requirements.txt
+
+      # 4. Write the GCP service account key to a temp file
+      #    The script uses GOOGLE_APPLICATION_CREDENTIALS to authenticate
+      - name: Authenticate with GCP
+        run: |
+          echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > /tmp/gcp_key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp_key.json" >> $GITHUB_ENV
+
+      # 5. Run the data generator
+      - name: Generate and upload data
+        env:
+          GCS_BUCKET_NAME: ${{ secrets.GCS_BUCKET_NAME }}
+        run: python data_generator/generate_data.py
+
+      # 6. Clean up key file
+      - name: Clean up credentials
+        if: always()
+        run: rm -f /tmp/gcp_key.json
